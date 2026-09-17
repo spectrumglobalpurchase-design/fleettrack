@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>FleetTrack — Live Vehicle Positions (Copy)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --bg: #0E1320;
+    --bg-elevated: #161D2E;
+    --bg-panel: #131A29;
+    --line: #26304A;
+    --line-soft: #1C243A;
+    --text: #E9ECF4;
+    --text-dim: #8B93AC;
+    --text-faint: #5A6280;
+    --accent: #E8A33D;
+    --accent-dim: #6B5326;
+    --live: #4FC98A;
+    --live-dim: #1F4636;
+    --idle: #E8A33D;
+    --idle-dim: #4A391A;
+    --offline: #6B7390;
+    --offline-dim: #232B42;
+    --danger: #E5564A;
+    --danger-dim: #4A2320;
+    --radar-ring: #202A42;
+    --radar-sweep: #E8A33D;
+    --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]){
+      --bg: #F3F2ED;
+      --bg-elevated: #FFFFFF;
+      --bg-panel: #FBFAF6;
+      --line: #DDDACE;
+      --line-soft: #E7E4D9;
+      --text: #1B1D22;
+      --text-dim: #5C5F6B;
+      --text-faint: #91949E;
+      --accent-dim: #F3DDB2;
+      --live-dim: #D7EEE0;
+      --idle-dim: #F5E4C2;
+      --offline-dim: #E5E3DC;
+      --danger-dim: #F5D9D6;
+      --radar-ring: #E2DFD3;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg: #0E1320; --bg-elevated: #161D2E; --bg-panel: #131A29;
+    --line: #26304A; --line-soft: #1C243A; --text: #E9ECF4;
+    --text-dim: #8B93AC; --text-faint: #5A6280; --accent-dim: #6B5326;
+    --live-dim: #1F4636; --idle-dim: #4A391A; --offline-dim: #232B42;
+    --danger-dim: #4A2320; --radar-ring: #202A42;
+  }
+
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{margin:0; padding:0;}
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    min-height: 100vh;
+    line-height: 1.45;
+  }
+  ::selection{ background: var(--accent-dim); color: var(--text); }
+
+  a{ color: var(--accent); }
+
+  .app{
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 20px 18px 56px;
+  }
+
+  /* ---------- Header ---------- */
+  header.top{
+    display:flex; align-items:center; justify-content:space-between;
+    gap: 14px; flex-wrap: wrap;
+    margin-bottom: 22px;
+  }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand-mark{
+    width: 34px; height: 34px; border-radius: 8px;
+    background: radial-gradient(circle at 32% 28%, var(--accent), #B87A1E 72%);
+    position: relative; flex-shrink:0;
+  }
+  .brand-mark::after{
+    content:""; position:absolute; inset: 9px;
+    border-radius:50%; border: 2px solid rgba(14,19,32,.55);
+    border-top-color: transparent;
+  }
+  .brand-name{ font-weight:700; font-size: 1.18rem; letter-spacing: -0.01em; }
+  .brand-sub{ color: var(--text-faint); font-size: .78rem; margin-top: -1px; }
+
+  .mode-switch{
+    display:flex; background: var(--bg-elevated);
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px;
+    gap: 2px;
+  }
+  .mode-switch button{
+    appearance:none; border:none; background:transparent; color: var(--text-dim);
+    font-family: var(--font-display); font-weight:600; font-size:.86rem;
+    padding: 8px 18px; border-radius: 999px; cursor:pointer;
+    transition: background .15s ease, color .15s ease;
+  }
+  .mode-switch button.active{ background: var(--accent); color: #1B1200; }
+  .mode-switch button:not(.active):hover{ color: var(--text); }
+
+  /* ---------- Generic panels ---------- */
+  .panel{
+    background: var(--bg-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+  .panel + .panel{ margin-top: 16px; }
+  h2.panel-title{
+    margin: 0 0 4px; font-size: 1rem; font-weight: 600;
+  }
+  p.panel-desc{ margin: 0 0 16px; color: var(--text-dim); font-size: .87rem; max-width: 52ch;}
+
+  label.field-label{
+    display:block; font-size: .78rem; color: var(--text-dim);
+    margin-bottom: 6px; font-weight: 500;
+  }
+  input.text-input{
+    width:100%; background: var(--bg-elevated); border:1px solid var(--line);
+    color: var(--text); font-family: var(--font-display); font-size: .95rem;
+    padding: 10px 12px; border-radius: var(--radius-sm); outline:none;
+  }
+  input.text-input:focus{ border-color: var(--accent); }
+  .field{ margin-bottom: 14px; }
+
+  button.btn{
+    appearance:none; border:none; cursor:pointer; font-family: var(--font-display);
+    font-weight:600; font-size:.92rem; padding: 11px 20px; border-radius: var(--radius-sm);
+    transition: filter .15s ease, transform .05s ease;
+  }
+  button.btn:active{ transform: translateY(1px); }
+  button.btn.primary{ background: var(--accent); color:#1B1200; }
+  button.btn.primary:hover{ filter: brightness(1.08); }
+  button.btn.stop{ background: var(--danger); color:#fff; }
+  button.btn.stop:hover{ filter: brightness(1.08); }
+  button.btn.ghost{ background: transparent; color: var(--text-dim); border:1px solid var(--line); }
+  button.btn.ghost:hover{ color: var(--text); border-color: var(--text-faint); }
+  button.btn:disabled{ opacity:.5; cursor:not-allowed; }
+
+  /* ---------- Status dot ---------- */
+  .status-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; flex-shrink:0; }
+  .status-dot.live{ background: var(--live); box-shadow: 0 0 0 3px var(--live-dim); }
+  .status-dot.idle{ background: var(--idle); box-shadow: 0 0 0 3px var(--idle-dim); }
+  .status-dot.offline{ background: var(--offline); box-shadow: 0 0 0 3px var(--offline-dim); }
+
+  /* ---------- Driver mode ---------- */
+  .driver-wrap{ display:flex; justify-content:center; }
+  .driver-card{ width:100%; max-width: 460px; }
+  .telemetry{
+    display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0;
+  }
+  .telemetry .stat{
+    background: var(--bg-elevated); border: 1px solid var(--line-soft);
+    border-radius: var(--radius-sm); padding: 12px;
+  }
+  .telemetry .stat .label{ font-size:.72rem; color: var(--text-faint); margin-bottom:4px; }
+  .telemetry .stat .value{ font-family: var(--font-mono); font-size: 1.02rem; font-weight:600; }
+
+  .share-status{
+    display:flex; align-items:center; gap:8px; margin: 14px 0 18px;
+    font-size:.88rem; color: var(--text-dim);
+  }
+  .share-status strong{ color: var(--text); }
+
+  .notice{
+    font-size: .82rem; color: var(--text-faint); border-top: 1px solid var(--line-soft);
+    margin-top: 18px; padding-top: 14px; line-height: 1.55;
+  }
+
+  .err-box{
+    background: var(--danger-dim); border: 1px solid var(--danger); color: var(--text);
+    border-radius: var(--radius-sm); padding: 10px 12px; font-size: .84rem; margin-bottom: 14px;
+  }
+
+  /* ---------- Dispatch mode ---------- */
+  .dispatch-grid{
+    display:grid; grid-template-columns: 320px 1fr; gap: 16px; align-items:start;
+  }
+  @media (max-width: 860px){
+    .dispatch-grid{ grid-template-columns: 1fr; }
+  }
+
+  .fleet-list{ display:flex; flex-direction:column; gap:8px; max-height: 620px; overflow-y:auto; }
+  .fleet-empty{ color: var(--text-faint); font-size: .86rem; padding: 8px 2px; }
+
+  .vehicle-card{
+    background: var(--bg-elevated); border: 1px solid var(--line-soft);
+    border-radius: var(--radius-sm); padding: 12px 13px; cursor:pointer;
+    transition: border-color .12s ease, background .12s ease;
+  }
+  .vehicle-card:hover{ border-color: var(--text-faint); }
+  .vehicle-card.selected{ border-color: var(--accent); background: rgba(232,163,61,.06); }
+  .vehicle-card .row1{ display:flex; align-items:center; gap:8px; justify-content:space-between; }
+  .vehicle-card .vname{ font-weight:600; font-size: .93rem; display:flex; align-items:center; gap:7px; }
+  .vehicle-card .vmeta{ font-size:.76rem; color: var(--text-faint); margin-top:4px; }
+  .vehicle-card .vspeed{ font-family: var(--font-mono); font-size:.78rem; color: var(--text-dim); }
+  .vehicle-card .vactions{ display:flex; gap:6px; margin-top:9px; }
+  .vehicle-card .vactions a, .vehicle-card .vactions button{
+    font-size:.72rem; text-decoration:none; color: var(--text-dim);
+    background: var(--bg-panel); border:1px solid var(--line); padding:4px 9px;
+    border-radius: 999px; font-family: var(--font-display); cursor:pointer;
+  }
+  .vehicle-card .vactions a:hover, .vehicle-card .vactions button:hover{ color: var(--text); border-color: var(--text-faint); }
+
+  /* ---------- Radar ---------- */
+  .radar-panel{ padding: 0; overflow:hidden; }
+  .radar-head{ padding: 16px 20px 0; display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px;}
+  .radar-legend{ display:flex; gap:14px; font-size:.74rem; color: var(--text-faint); padding: 0 20px; margin-top: 8px;}
+  .radar-legend span{ display:flex; align-items:center; gap:5px; }
+  .radar-stage{ position:relative; width:100%; aspect-ratio: 1 / 1; max-height: 560px; margin: 14px auto 0; }
+  svg.radar-svg{ width:100%; height:100%; display:block; }
+  .radar-empty-msg{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    text-align:center; color: var(--text-faint); font-size:.86rem; padding: 0 30px;
+  }
+  .radar-footer{ padding: 14px 20px 18px; font-size:.76rem; color: var(--text-faint); border-top: 1px solid var(--line-soft); margin-top: 10px; }
+
+  .count-badge{
+    font-family: var(--font-mono); font-size: .78rem; color: var(--text-dim);
+    background: var(--bg-elevated); border:1px solid var(--line); border-radius: 999px;
+    padding: 4px 11px;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  .pulse{
+    animation: pulseAnim 1.8s ease-in-out infinite;
+  }
+  @keyframes pulseAnim{
+    0%,100%{ opacity: 1; }
+    50%{ opacity: .35; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <div class="brand-name">FleetTrack</div>
+        <div class="brand-sub">Live position, phone GPS</div>
+      </div>
+    </div>
+    <div class="mode-switch" id="modeSwitch">
+      <button id="btnDriverMode" class="active">Driver</button>
+      <button id="btnDispatchMode">Dispatch</button>
+    </div>
+  </header>
+
+  <main id="mainArea"></main>
+
+</div>
+
+<script>
+(function(){
+
+  // ---------------- State ----------------
+  let db = null;
+  let mode = 'driver'; // 'driver' | 'dispatch'
+  let sharing = false;
+  let watchId = null;
+  let myVehicleId = null;
+  let lastWriteAt = 0;
+  let lastKnownFix = null;
+  let vehicles = {}; // id -> data
+  let unsubscribe = null;
+  let selectedVehicleId = null;
+  let clockTimer = null;
+
+  const mainArea = document.getElementById('mainArea');
+
+  // ---------------- Utilities ----------------
+  function safeLocalGet(key){
+    try { return localStorage.getItem(key); } catch(e){ return null; }
+  }
+  function safeLocalSet(key, val){
+    try { localStorage.setItem(key, val); } catch(e){ /* ignore */ }
+  }
+
+  function slugify(str){
+    const s = (str || '').trim().toLowerCase()
+      .replace(/[^a-z0-9_\-\.~:@+ ]/g, '')
+      .trim().replace(/\s+/g, '-');
+    return s.slice(0, 60);
+  }
+
+  function fmtAgo(ts){
+    if(!ts) return '—';
+    const diff = Math.max(0, Date.now() - ts);
+    if(diff < 5000) return 'just now';
+    if(diff < 60000) return Math.floor(diff/1000) + 's ago';
+    if(diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+    return Math.floor(diff/3600000) + 'h ago';
+  }
+
+  function statusFor(ts){
+    if(!ts) return 'offline';
+    const diff = Date.now() - ts;
+    if(diff < 20000) return 'live';
+    if(diff < 180000) return 'idle';
+    return 'offline';
+  }
+
+  function fmtSpeed(mps){
+    if(mps === null || mps === undefined || isNaN(mps)) return '—';
+    const kmh = mps * 3.6;
+    return kmh.toFixed(0) + ' km/h';
+  }
+
+  function fmtCoord(n){
+    if(n === null || n === undefined || isNaN(n)) return '—';
+    return n.toFixed(5);
+  }
+
+  function escapeHtml(str){
+    const d = document.createElement('div');
+    d.textContent = str == null ? '' : String(str);
+    return d.innerHTML;
+  }
+
+  // ---------------- Firebase setup ----------------
+  const firebaseConfig = {
+    apiKey: "AIzaSyA1rP16JrgvsGh-87-kdRYxfrDCRjaT32M",
+    authDomain: "fleettrack-d7d1a.firebaseapp.com",
+    projectId: "fleettrack-d7d1a",
+    storageBucket: "fleettrack-d7d1a.firebasestorage.app",
+    messagingSenderId: "450584973858",
+    appId: "1:450584973858:web:6c17501af86060aa08707b"
+  };
+
+  async function initCapabilities(){
+    try{
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.firestore();
+    }catch(e){ console.error('Firebase init failed', e); }
+  }
+
+  // ---------------- Mode switching ----------------
+  function setMode(next){
+    mode = next;
+    document.getElementById('btnDriverMode').classList.toggle('active', mode === 'driver');
+    document.getElementById('btnDispatchMode').classList.toggle('active', mode === 'dispatch');
+    if(mode === 'driver'){
+      stopDispatchSubscription();
+      renderDriver();
+    } else {
+      renderDispatch();
+      startDispatchSubscription();
+    }
+  }
+  document.getElementById('btnDriverMode').addEventListener('click', () => setMode('driver'));
+  document.getElementById('btnDispatchMode').addEventListener('click', () => setMode('dispatch'));
+
+  // ================= DRIVER MODE =================
+
+  function renderDriver(){
+    const savedLabel = safeLocalGet('ft_vehicle_label') || '';
+    const savedDriver = safeLocalGet('ft_driver_name') || '';
+
+    mainArea.innerHTML = `
+      <div class="driver-wrap">
+        <div class="panel driver-card">
+          <h2 class="panel-title">Share this vehicle's position</h2>
+          <p class="panel-desc">Keep this page open on the phone riding in the vehicle. Position updates go straight to the dispatch dashboard for your team.</p>
+
+          <div id="driverError"></div>
+
+          <div class="field">
+            <label class="field-label" for="vehicleLabel">Vehicle label</label>
+            <input class="text-input" id="vehicleLabel" placeholder="e.g. Truck 04, Van B" value="${escapeHtml(savedLabel)}" ${sharing ? 'disabled' : ''}>
+          </div>
+          <div class="field">
+            <label class="field-label" for="driverName">Driver name</label>
+            <input class="text-input" id="driverName" placeholder="Your name" value="${escapeHtml(savedDriver)}" ${sharing ? 'disabled' : ''}>
+          </div>
+
+          <div id="driverActionArea"></div>
+
+          <div id="telemetryArea"></div>
+
+          <div class="notice">
+            Uses this phone's browser GPS. Accuracy depends on signal, and most mobile browsers pause updates if the screen locks or the tab moves to the background — keep the screen on while driving for the steadiest feed.
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('vehicleLabel').addEventListener('input', (e) => {
+      safeLocalSet('ft_vehicle_label', e.target.value);
+    });
+    document.getElementById('driverName').addEventListener('input', (e) => {
+      safeLocalSet('ft_driver_name', e.target.value);
+    });
+
+    renderDriverAction();
+  }
+
+  function renderDriverAction(){
+    const area = document.getElementById('driverActionArea');
+    if(!area) return;
+    if(!sharing){
+      area.innerHTML = `<button class="btn primary" id="startShareBtn" style="width:100%">Start sharing position</button>`;
+      document.getElementById('startShareBtn').addEventListener('click', startSharing);
+    } else {
+      area.innerHTML = `
+        <div class="share-status"><span class="status-dot live pulse"></span> <strong>Sharing live</strong> &nbsp;as ${escapeHtml(myVehicleId || '')}</div>
+        <button class="btn stop" id="stopShareBtn" style="width:100%">Stop sharing</button>
+      `;
+      document.getElementById('stopShareBtn').addEventListener('click', stopSharing);
+    }
+  }
+
+  function renderTelemetry(){
+    const area = document.getElementById('telemetryArea');
+    if(!area) return;
+    if(!sharing || !lastKnownFix){
+      area.innerHTML = '';
+      return;
+    }
+    area.innerHTML = `
+      <div class="telemetry">
+        <div class="stat"><div class="label">Speed</div><div class="value">${fmtSpeed(lastKnownFix.speed)}</div></div>
+        <div class="stat"><div class="label">Accuracy</div><div class="value">${lastKnownFix.accuracy ? Math.round(lastKnownFix.accuracy) + ' m' : '—'}</div></div>
+        <div class="stat"><div class="label">Latitude</div><div class="value">${fmtCoord(lastKnownFix.lat)}</div></div>
+        <div class="stat"><div class="label">Longitude</div><div class="value">${fmtCoord(lastKnownFix.lng)}</div></div>
+      </div>
+      <div class="notice" style="border-top:none; margin-top:0; padding-top:0;">Last sent to dispatch: ${fmtAgo(lastWriteAt)}</div>
+    `;
+  }
+
+  function showDriverError(msg){
+    const el = document.getElementById('driverError');
+    if(!el) return;
+    el.innerHTML = msg ? `<div class="err-box">${escapeHtml(msg)}</div>` : '';
+  }
+
+  async function startSharing(){
+    showDriverError('');
+    const labelInput = document.getElementById('vehicleLabel');
+    const driverInput = document.getElementById('driverName');
+    const label = (labelInput.value || '').trim();
+    const driverName = (driverInput.value || '').trim();
+
+    if(!label){
+      showDriverError('Give this vehicle a label before sharing.');
+      return;
+    }
+    if(!navigator.geolocation){
+      showDriverError('This browser does not support location sharing.');
+      return;
+    }
+    if(!db){
+      showDriverError('Live sync is not available in this view right now.');
+      return;
+    }
+
+    let vid = slugify(label);
+    if(!vid){ vid = 'vehicle-' + Math.random().toString(36).slice(2, 8); }
+    myVehicleId = vid;
+    safeLocalSet('ft_vehicle_id', vid);
+
+    sharing = true;
+    renderDriverAction();
+
+    watchId = navigator.geolocation.watchPosition(
+      onPosition,
+      onPositionError,
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    );
+  }
+
+  function stopSharing(){
+    if(watchId !== null && navigator.geolocation){
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+    sharing = false;
+    if(db && myVehicleId){
+      db.doc('vehicles/' + myVehicleId).update({ sharing: false }).catch(()=>{});
+    }
+    renderDriverAction();
+    renderTelemetry();
+  }
+
+  function onPositionError(err){
+    let msg = "Could not read this phone's location.";
+    if(err && err.code === 1) msg = 'Location permission was denied. Allow location access in the browser to share position.';
+    else if(err && err.code === 2) msg = 'Location is currently unavailable.';
+    else if(err && err.code === 3) msg = 'Location request timed out. Retrying…';
+    showDriverError(msg);
+  }
+
+  function onPosition(pos){
+    const c = pos.coords;
+    lastKnownFix = {
+      lat: c.latitude, lng: c.longitude,
+      speed: c.speed, accuracy: c.accuracy, heading: c.heading
+    };
+    renderTelemetry();
+
+    const now = Date.now();
+    if(now - lastWriteAt < 5000) return; // throttle writes
+    writeFix();
+  }
+
+  function writeFix(){
+    if(!db || !myVehicleId || !lastKnownFix) return;
+    const driverInputVal = safeLocalGet('ft_driver_name') || '';
+    const labelVal = safeLocalGet('ft_vehicle_label') || myVehicleId;
+    lastWriteAt = Date.now();
+    const body = {
+      label: labelVal,
+      driverName: driverInputVal,
+      lat: lastKnownFix.lat,
+      lng: lastKnownFix.lng,
+      speed: (lastKnownFix.speed === null || lastKnownFix.speed === undefined) ? null : lastKnownFix.speed,
+      accuracy: lastKnownFix.accuracy || null,
+      heading: (lastKnownFix.heading === null || lastKnownFix.heading === undefined) ? null : lastKnownFix.heading,
+      sharing: true,
+      updatedAt: lastWriteAt
+    };
+    db.doc('vehicles/' + myVehicleId).set(body).then(() => {
+      renderTelemetry();
+    }).catch((e) => {
+      showDriverError('Could not sync position right now. Retrying automatically.');
+    });
+  }
+
+  // ================= DISPATCH MODE =================
+
+  function renderDispatch(){
+    mainArea.innerHTML = `
+      <div class="dispatch-grid">
+        <div class="panel" style="padding:16px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+            <h2 class="panel-title" style="margin:0;">Fleet</h2>
+            <span class="count-badge" id="fleetCount">0 vehicles</span>
+          </div>
+          <div class="fleet-list" id="fleetList">
+            <div class="fleet-empty">Waiting for vehicles to report position…</div>
+          </div>
+        </div>
+
+        <div class="panel radar-panel">
+          <div class="radar-head">
+            <h2 class="panel-title" style="margin:0;">Relative positions</h2>
+            <span style="color:var(--text-faint); font-size:.78rem;">Radar view, not a street map</span>
+          </div>
+          <div class="radar-legend">
+            <span><span class="status-dot live"></span> live &lt; 20s</span>
+            <span><span class="status-dot idle"></span> idle &lt; 3m</span>
+            <span><span class="status-dot offline"></span> offline</span>
+          </div>
+          <div class="radar-stage" id="radarStage">
+            <div class="radar-empty-msg" id="radarEmptyMsg">No vehicles are currently reporting. Open Driver mode on a phone in the vehicle to begin.</div>
+          </div>
+          <div class="radar-footer">Tap a vehicle in the fleet list to open it on Google Maps.</div>
+        </div>
+      </div>
+    `;
+    renderFleetList();
+    renderRadar();
+
+    if(clockTimer) clearInterval(clockTimer);
+    clockTimer = setInterval(() => {
+      if(mode === 'dispatch'){ renderFleetList(); renderRadar(); }
+    }, 5000);
+  }
+
+  function startDispatchSubscription(){
+    if(!db) return;
+    if(unsubscribe) return;
+    try{
+      unsubscribe = db.collection('vehicles').onSnapshot((snap) => {
+        vehicles = {};
+        snap.docs.forEach(d => {
+          if(d.exists){ vehicles[d.id] = d.data(); }
+        });
+        if(mode === 'dispatch'){
+          renderFleetList();
+          renderRadar();
+        }
+      }, (err) => {
+        console.error('vehicles subscription error', err);
+      });
+    }catch(e){ /* ignore */ }
+  }
+
+  function stopDispatchSubscription(){
+    if(unsubscribe){ unsubscribe(); unsubscribe = null; }
+    if(clockTimer){ clearInterval(clockTimer); clockTimer = null; }
+  }
+
+  function vehicleList(){
+    return Object.keys(vehicles).map(id => ({ id, ...vehicles[id] }))
+      .sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+  }
+
+  function renderFleetList(){
+    const listEl = document.getElementById('fleetList');
+    const countEl = document.getElementById('fleetCount');
+    if(!listEl) return;
+    const list = vehicleList();
+    countEl.textContent = list.length + (list.length === 1 ? ' vehicle' : ' vehicles');
+
+    if(list.length === 0){
+      listEl.innerHTML = '<div class="fleet-empty">Waiting for vehicles to report position…</div>';
+      return;
+    }
+
+    listEl.innerHTML = list.map(v => {
+      const st = statusFor(v.updatedAt);
+      const mapsUrl = (v.lat && v.lng) ? ('https://www.google.com/maps?q=' + v.lat + ',' + v.lng) : null;
+      return `
+        <div class="vehicle-card ${v.id === selectedVehicleId ? 'selected' : ''}" data-vid="${escapeHtml(v.id)}">
+          <div class="row1">
+            <div class="vname"><span class="status-dot ${st} ${st==='live'?'pulse':''}"></span> ${escapeHtml(v.label || v.id)}</div>
+            <div class="vspeed">${fmtSpeed(v.speed)}</div>
+          </div>
+          <div class="vmeta">${v.driverName ? escapeHtml(v.driverName) + ' · ' : ''}${fmtAgo(v.updatedAt)}</div>
+          <div class="vactions">
+            ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener">Open in Maps</a>` : ''}
+            <button data-remove="${escapeHtml(v.id)}">Remove</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    listEl.querySelectorAll('.vehicle-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if(e.target.closest('[data-remove]') || e.target.closest('a')) return;
+        selectedVehicleId = card.getAttribute('data-vid');
+        renderFleetList();
+        renderRadar();
+      });
+    });
+    listEl.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const vid = btn.getAttribute('data-remove');
+        if(db){
+          db.doc('vehicles/' + vid).delete().catch(()=>{});
+        }
+      });
+    });
+  }
+
+  function renderRadar(){
+    const stage = document.getElementById('radarStage');
+    const emptyMsg = document.getElementById('radarEmptyMsg');
+    if(!stage) return;
+    const list = vehicleList().filter(v => typeof v.lat === 'number' && typeof v.lng === 'number');
+
+    if(list.length === 0){
+      if(emptyMsg) emptyMsg.style.display = 'flex';
+      const existingSvg = stage.querySelector('svg');
+      if(existingSvg) existingSvg.remove();
+      return;
+    }
+    if(emptyMsg) emptyMsg.style.display = 'none';
+
+    // Compute bounding box, centered radar
+    const lats = list.map(v => v.lat), lngs = list.map(v => v.lng);
+    let minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    let minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+    const centerLat = (minLat + maxLat) / 2;
+    const centerLng = (minLng + maxLng) / 2;
+    let spanLat = Math.max(maxLat - minLat, 0.0015);
+    let spanLng = Math.max(maxLng - minLng, 0.0015);
+    const span = Math.max(spanLat, spanLng) * 1.6; // padding
+
+    const size = 500;
+    const cx = size/2, cy = size/2;
+    const maxR = size/2 - 42;
+
+    function project(lat, lng){
+      const dLat = lat - centerLat;
+      const dLng = lng - centerLng;
+      const x = cx + (dLng / span) * (size - 84);
+      const y = cy - (dLat / span) * (size - 84);
+      return [x, y];
+    }
+
+    const rings = [0.25, 0.5, 0.75, 1].map(f => {
+      const r = maxR * f;
+      return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--radar-ring)" stroke-width="1"/>`;
+    }).join('');
+
+    const crosshair = `
+      <line x1="${cx-maxR}" y1="${cy}" x2="${cx+maxR}" y2="${cy}" stroke="var(--radar-ring)" stroke-width="1"/>
+      <line x1="${cx}" y1="${cy-maxR}" x2="${cx}" y2="${cy+maxR}" stroke="var(--radar-ring)" stroke-width="1"/>
+    `;
+
+    const colorFor = (st) => st === 'live' ? 'var(--live)' : st === 'idle' ? 'var(--idle)' : 'var(--offline)';
+
+    const points = list.map(v => {
+      const [x,y] = project(v.lat, v.lng);
+      const st = statusFor(v.updatedAt);
+      const color = colorFor(st);
+      const isSel = v.id === selectedVehicleId;
+      const r = isSel ? 9 : 6.5;
+      return `
+        <g data-vid="${escapeHtml(v.id)}" style="cursor:pointer;">
+          ${isSel ? `<circle cx="${x}" cy="${y}" r="${r+6}" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.6"/>` : ''}
+          <circle cx="${x}" cy="${y}" r="${r}" fill="${color}" ${st==='live' ? 'class="pulse"' : ''} />
+          <text x="${x}" y="${y - r - 7}" text-anchor="middle" font-family="Space Grotesk, sans-serif" font-size="11" font-weight="600" fill="var(--text)">${escapeHtml(v.label || v.id)}</text>
+        </g>
+      `;
+    }).join('');
+
+    const svg = `
+      <svg class="radar-svg" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+        ${rings}
+        ${crosshair}
+        <circle cx="${cx}" cy="${cy}" r="2.5" fill="var(--text-faint)"/>
+        ${points}
+      </svg>
+    `;
+
+    stage.querySelectorAll('svg').forEach(s => s.remove());
+    stage.insertAdjacentHTML('beforeend', svg);
+
+    stage.querySelectorAll('[data-vid]').forEach(g => {
+      g.addEventListener('click', () => {
+        selectedVehicleId = g.getAttribute('data-vid');
+        renderFleetList();
+        renderRadar();
+      });
+    });
+  }
+
+  // ---------------- Boot ----------------
+  (async function boot(){
+    await initCapabilities();
+    const savedId = safeLocalGet('ft_vehicle_id');
+    if(savedId) myVehicleId = savedId;
+    renderDriver();
+  })();
+
+})();
+</script>
+</body>
+</html>
